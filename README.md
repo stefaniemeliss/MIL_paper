@@ -1,0 +1,31 @@
+# Motivated Incidental Learning (MIL)
+This repository contains the code for the "Motivated Incidental Learning (MIL)" project.
+
+## Scope of project
+
+In the course of the project, a new paradigm was developed to investigate the effects of motivation (i.e., the subjective feeling of curioity and the availability of extrinsic incentives) on memory encoding. This *magic trick paradigm* was tested in two behavioural and one fMRI sample. Participants viewed a series of magic trick videos and performed a judgement task including curiosity ratings. The performance in the judgement task was incentivised for half of the participants. A week later, memory for the magic tricks was tested using a suprise memory test.
+
+## Structure of code
+
+The repository contains various sub-folders that each contain numbered script files (e.g., "1_preprocessing_task_data.sh") that were executed in order. Below, the content of each folder is described.
+
+### 1. behavioural
+The **./behavioural** folder contains the R code used for the behavioural analysis presented in the work cited above. The script "1_preprocessing_task_data.R" downloads the data files from a private OSF repository and merges them into two final data files (i.e., "wide_MagicBehavioural.csv" and "long_MagicBehavioural.csv") that are uploaded in the folder. The file "2_analysis_task_data.R" then takes the input files and analyses the data from all three experiments using Generalised Linear Mixed Effects model and then meta-analytically integrates the observed effects. The script further contains the code to create Figure 3 & Tables 1-2 in the manuscript and Figures S4-S6 & Tables S1-7 in the supplementary materials. 
+
+### 2. concat
+The **./concat** folder contains R and bash script files used to concatenate the pre-processed fMRI  time series. The pre-processed fMRI time series was downloaded from the Magic, Memory, and Curiosity (MMC) fMRI Dataset. The MMC Dataset is available on the OpenNeuro platform for sharing neuroimaging data at doi:10.18112/openneuro.ds004182.v1.0.0 (dataset accession number ds004182; https://openneuro.org/datasets/ds004182/versions/1.0.0) and contains raw as well as pre-processed data. Input for the concatenation step are each subject's pre-processed task time series (i.e., [SUBJECT-ID]_task-magictrickwatching_desc-fullpreproc.nii.gz) that can be found in the derivatives folder. The file "1_run_initial_3dTcat_after_preprocessing_magictrickwatching.sh" runs an inital concatenation step to create the time series needed for the Intersubject Pattern Correlation (ISPC or spatial ISC; see supplementary materials for details). The script "2_extract_data_for_spatial_ISC.sh" then uses the initially concatenated time series to extract the values from the bilateral second visual area (V2) for each subject as well as the mean of all other subjects (leave-one-out cross validation; LOOCV). Spatial ISC is then computed in R script "3_run_spatial_ISC_to_determine_HRF_lag.R" to determine the optimal HRF lag. This lag is then applied to the final concatenation step in script "4_run_final_3dTcat_after_preprocessing_magictrickwatching.sh".
+
+### 3. masks
+The **./masks** folder contains code to create the masks for the *a priori* defined regions-of-interest (ROIs). atlaskit (https:/github.com/jmtyszka/atlaskit; sctipt "1_run_atlaskit.sh") was used to select masks for Nucleus Accumbens (NAcc), Ventral Tegmental Area (VTA), Substantia Nigra (SN), and Caudaute Nucleus (CN); whereas the mask for the hippocampus (HPC) and grey matter (GM) were created using AFNI (script "2_create_ROIs_and_masks.sh"). All masks were resampled to the ICBM 2009c Nonlinear Asymmetric template and EPI grid (3x3x3) in the second script. The final output masks can be found in the NeuroVault collection corresponding to this manuscript (link: https://neurovault.org/collections/12978/).
+
+### 4. paiwise_maps
+The **./pairwise_maps** contains code used to create the the pairwise maps and data table files necessary for the intersubject synchronisation analysis framework. The script "1_run_3dTcorr1D_magictrickwatching.sh" uses the ROI masks created to extract the ROI time series data from the concatenated fMRI time series (final step). The extracted ROI time courses are used to compute pairwise intersubject functional connectivity (ISFC) maps where the averaged ROI time course in subject A is correlated with the time course of each voxel in subject B. The script "2_run_3dTcorrelate_magictrickwatching.sh", on the other hand, computes the intersubject correlation (ISC) maps correlating the time course of each voxel in subject A with the time course of the corresponding voxel in subject B. The script "3_create_dataTable_and_conduct_isfc_analysis.R" then uses the extracted ROI time courses to compute ROI-to-ROI-ISFC and to create dataTable_[].txt files needed for the specification of Linear Mixed effects models with crossed random effects (LME-CRE) in AFNI. This script further contains the code to create Table S11 in the supplementary materials. The script "4_create_figures_illustrating_pairwise_maps.R" creates plots that were used in Figure 2 in the manuscript and Figures S2 and S8 in the supplementary material. 
+
+### 5. ISC & ISFC
+The **./ISC** and **./ISFC** folders contain code to conduct the ISC and ISFC analysis, respectively. Both contain files with similar structure. The script "1_create_3dISC.sh" creates separate 3dISC script files (i.e., AFNI code to conduct LME-CRE) specifying ISC and ISFC analysis at whole-brain level as well as ISC analysis within the ROIs. Further, the script creates separate 3dISC script files for intersubject / intersubject functional connectivity representational similarity analysis (IS-RSA / ISFC-RSA) at whole brain level as well as in the ROIs for the IS-RSA. These 3dISC script files specifying the different analyses are executed (i.e., the analysis are run) using the script "2_run_3dISC.sh". Results are extracted and plotted using the script "3_run_chauffer.sh".
+
+
+## References
+MMC Data descriptor: Meliss, S., Murayama, K., Skipper, J. I., & Martin, C. P. (2022). The Magic, Memory, and Curiosity fMRI Dataset of People Viewing Magic Tricks. https://psyarxiv.com/zq7gv 
+
+MIL manuscript: [ADD REF] 
