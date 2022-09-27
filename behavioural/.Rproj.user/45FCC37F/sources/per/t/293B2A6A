@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1664311299399.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "927707558",
+    "id" : "293B2A6A",
+    "lastKnownWriteTime" : 1664289394,
+    "last_content_update" : 1664289394,
+    "path" : "~/Dropbox/Reading/PhD/Magictricks/publications/task_paper/MIL_paper/behavioural/2_analysis_task_data.R",
+    "project_path" : "2_analysis_task_data.R",
+    "properties" : {
+        "cursorPosition" : "15,0",
+        "scrollLine" : "0"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
