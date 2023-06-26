@@ -1,0 +1,404 @@
+---
+title: "stdev_off-diag"
+output: html_document
+date: "2023-06-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Set up file names
+```{r}
+
+################################################################################
+# compute spatial ISC / Intersubject pattern correlation (ISPC)
+################################################################################
+
+#.rs.restartR()
+
+rm(list = ls())
+gc()
+
+library(ggplot2)
+library(dplyr)
+
+# define necessary directories
+anal_dir <- getwd() # current directory where the project file is saved
+#fig_dir <- file.path(anal_dir, "figures")
+fig_dir <- file.path(anal_dir, "figures_AT")
+if (dir.exists(fig_dir) == F ) {
+  dir.create(fig_dir)
+}
+
+#concat_dir <- file.path(anal_dir, "init_concat_V2")
+concat_dir <- file.path(anal_dir, "init_concat_AT")
+
+file_list <- list.files(concat_dir, pattern = "V2_subject")
+#file_list <- list.files(concat_dir, pattern = "V2_subject_sub-control001")
+#file_list <-  c("V2_subject_sub-control001.txt", "V2_subject_sub-control002.txt")
+# prepare objects to save data in
+MZ_list <- c()
+
+# create s iterator
+s <- 0
+```
+
+#Skip this if you already run 2_run_spatial_ISC_to_determine_HRF_lag.R
+#Compute ISC with parallel processing
+```{r}
+library(parallel)
+# Before the loop, set up a parallel backend with the number of cores
+cores <- detectCores() - 1 # number of cores to use (one less than the total number of cores)
+
+# compute intersubject pattern correlation for each subject with the mean of all other subjects #
+for (file in file_list) {
+
+  # define subject
+  s <- s + 1
+  subject <- gsub("V2_subject_", "", file)
+  subject <- gsub(".txt", "", subject)
+  print(subject)
+
+  # measure time
+  start_time <- Sys.time()
+
+  # read in data for each subject
+  df_sub <- read.table(file.path(concat_dir, paste0("V2_subject_", subject, ".txt" )))
+  df_mean <- read.table(file.path(concat_dir, paste0("V2_sample_mean_", subject, ".txt" )))
+
+  # create output data frame
+  print("computing correlation")
+
+  # Create a list to store the variables needed to compute the correlation
+  correlation_list <- mapply(function(t, v) {
+      list(df_sub_t = df_sub[, t], df_mean_v = df_mean[, v])
+    }, 
+    rep(1:dim(df_sub)[2], dim(df_mean)[2]), 
+    rep(1:dim(df_mean)[2], each=dim(df_sub)[2]),
+    SIMPLIFY = FALSE
+  )
+
+  # Use mclapply to compute the correlation in parallel
+  correlations <- mclapply(correlation_list, 
+                           function(x) cor(x$df_sub_t, x$df_mean_v),
+                           mc.cores = cores)
+
+  # Convert correlations to a matrix
+  df_out <- matrix(unlist(correlations), nrow = dim(df_sub)[2], ncol = dim(df_mean)[2])
+  
+  # transform df to matrix and ***fisher's z transform*** the correlation values
+  M <- df_out
+  Z <- atanh(M)
+
+  # add row names
+  row.names(M) <- paste0("t", 1:nrow(M))
+  row.names(Z) <- paste0("t", 1:nrow(Z))
+
+  # save data frame with distinct name
+  assign(paste0(subject, "_cor_raw"), M)
+  assign(paste0(subject, "_cor_z"), Z)
+  
+  # combine data from all subjects in one list
+  MZ_list[[(length(MZ_list) + 1)]] <- Z
+  
+  # remove what is not needed anymore
+  #rm(df_out, M, Z, df_sub, df_mean)
+  
+  # measure time
+  end_time <- Sys.time()
+  print(end_time - start_time)
+
+}
+
+```
+
+#Mean Fisher's Z and Raw Correlation of ISC
+```{r}
+
+# compute sample mean and transform values back to correlations #
+mean_MZ_all <- apply(simplify2array(MZ_list), 1:2, mean, na.rm = T)
+mean_cor_all <- tanh(mean_MZ_all)
+#rm(MZ_list)
+
+# save correlation matrices #
+write.csv(mean_MZ_all, file.path(concat_dir, "mean_cor_z.csv"))
+write.csv(mean_cor_all, file.path(concat_dir, "mean_cor_raw.csv"))
+
+# save correlation matrix graph
+png(file.path(fig_dir,"mean_corr_z.png"), 20000, 20000)
+ggcorrplot::ggcorrplot(mean_MZ_all)
+dev.off()
+
+png(file.path(fig_dir,"mean_corr_raw.png"), 20000, 20000)
+ggcorrplot::ggcorrplot(mean_cor_all)
+dev.off()
+```
+
+
+#SD of Fisher's Z and Raw Correlation of ISC
+```{r}
+# calculate standard deviation for each 'off-diagonal' (i.e., each timepoint with each other timepoint)
+sd_MZ_all <- apply(simplify2array(MZ_list), 1:2, sd, na.rm = T)
+
+# Save the standard deviations to a file
+write.csv(sd_MZ_all, file.path(concat_dir, "sd_cor_z.csv"))
+
+# save SD matrix graph
+png(file.path(fig_dir,"sd_corr_z.png"), 20000, 20000)
+ggcorrplot::ggcorrplot(sd_MZ_all)
+dev.off()
+
+# Convert the matrix to a data frame for plotting
+stddevs_df <- as.data.frame(as.table(sd_MZ_all))
+
+# Plot the standard deviations matrix gragh like means
+p <- ggplot(data = stddevs_df, aes(x = Var1, y = Var2, fill = Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Time point", y = "Time point", fill = "Std Dev") +
+  ggtitle("Standard Deviation of Fisher's Z Across Subjects")
+
+png(file.path(fig_dir, "sd_corr_z.png"), width = 2000, height = 2000, units = "px")
+print(p)
+dev.off()
+```
+
+#Plot mean and SD of fisher's z for each diagonal (lag)
+```{r}
+#Plot mean and sd of fisher's z (off-diagnal) across subjects.
+library(ggplot2)
+
+#extract diagonals
+num_timepoints <- dim(MZ_list[[1]])[1]
+upper_diag_mean <- vector("numeric", length = num_timepoints - 1)
+upper_diag_sd <- vector("numeric", length = num_timepoints - 1)
+upper_diag_mean_max <- vector("numeric", length = num_timepoints - 1)
+upper_diag_sd_max <- vector("numeric", length = num_timepoints - 1)
+
+lower_diag_mean <- vector("numeric", length = num_timepoints - 1)
+lower_diag_sd <- vector("numeric", length = num_timepoints - 1)
+lower_diag_mean_max <- vector("numeric", length = num_timepoints - 1)
+lower_diag_sd_max <- vector("numeric", length = num_timepoints - 1)
+
+for (i in 1:(num_timepoints - 1)) {
+  upper_diag <- mean_MZ_all[row(mean_MZ_all) == (col(mean_MZ_all) - i)]
+  if (length(upper_diag) > 1) {
+    upper_diag_mean[i] <- mean(upper_diag)
+    upper_diag_sd[i] <- sd(upper_diag)
+  } else {
+    upper_diag_mean[i] <- NA
+    upper_diag_sd[i] <- NA
+  }
+  
+
+  lower_diag <- mean_MZ_all[row(mean_MZ_all) == (col(mean_MZ_all) + i)]  
+  if (length(lower_diag) > 1) {
+    lower_diag_mean[i] <- mean(lower_diag)
+    lower_diag_sd[i] <- sd(lower_diag)
+  } else {
+    lower_diag_mean[i] <- NA
+    lower_diag_sd[i] <- NA
+  }
+  
+}
+
+#Select upper diagonal data for plotting
+plot_data <- data.frame(lag = 1:(num_timepoints - 1), mean_value = upper_diag_mean, upper_sd = upper_diag_sd, lower_sd = upper_diag_sd)
+write.csv(plot_data, file.path(concat_dir, "upper-diagonal_mean_sd.csv"))
+
+
+# Plot the upper off-diagonal characteristics with error bars
+ggplot(plot_data, aes(x = lag, y = mean_value)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = mean_value - lower_sd, ymax = mean_value + upper_sd), width = 0) +
+  scale_x_continuous(breaks = seq(0, max(plot_data$lag), by = 50)) +
+  labs(x = "Lag", y = "Mean Fisher's Z") +
+  ggtitle("Upper Off-diagonal Characteristics")
+
+#For the readability, seperate x axis into four panels
+# Create a new column to assign each data point to a panel
+plot_data$panel <- cut(plot_data$lag, breaks = seq(0, num_timepoints - 1, length.out = num_panels + 1), labels = FALSE)
+
+# Define the panel titles based on the range of x-axis with rounded lag values
+suppressWarnings({
+  panel_starts <- seq(0, (num_timepoints - 1) / num_panels * (num_panels - 1), by = (num_timepoints - 1) / num_panels)
+  panel_ends <- panel_starts + (num_timepoints - 1) / num_panels
+  panel_titles <- paste0("Lag (", round(panel_starts+1), " to ", round(panel_ends), ")")
+  panel_titles[1] <- paste0("Lag (", 0, " to ", round(panel_ends), ")")
+})
+
+
+# Create the plot with facets and custom panel titles
+p<- ggplot(plot_data, aes(x = lag, y = mean_value)) +
+    geom_point(color = "blue", size = 3) +
+    geom_errorbar(aes(ymin = mean_value - lower_sd, ymax = mean_value + upper_sd), width = 0.2, color = "black") +
+    facet_wrap(~ panel, scales = "free_x", ncol = 1, labeller = labeller(panel = as_labeller(setNames(panel_titles, 1:num_panels)))) +
+    labs(x = "Lag", y = "Mean Fisher's Z") +
+    ggtitle("Upper Off-diagonal Characteristics") +
+    theme_minimal() +
+    theme(plot.title = element_text(size=22),
+          panel.background = element_rect(fill = "white"),  # Set the background color to white
+          axis.title = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.text.x = element_text(angle = 0, hjust = 0.5),
+          panel.spacing = unit(0.5, "lines"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          strip.text = element_text(size = 20, face = "bold"),
+          strip.background = element_rect(fill = "white", color = "black"),
+          axis.ticks.x = element_line(size = 0.5),  # Customize x-axis ticks
+          axis.ticks.length = unit(0.2, "cm"),  # Set the length of x-axis ticks
+          axis.ticks.margin = unit(0.2, "cm"),  # Set the margin of x-axis ticks
+          axis.ticks = element_line(color = "black"),
+          plot.margin = margin(1, 1, 1, 1, "cm")) +
+    scale_x_continuous(breaks = seq(0, num_timepoints - 1, by = 20))  # Customize x-axis tick intervals
+
+png(file.path(fig_dir, "upper_off-diagonal_mean_and_sd_z.png"), width = 2000, height = 2000, units = "px")
+print(p)
+dev.off()
+
+
+
+#Select lower diagonal for plotting
+plot_data <- data.frame(lag = 1:(num_timepoints - 1), mean_value = lower_diag_mean, upper_sd = lower_diag_sd, lower_sd = lower_diag_sd)
+write.csv(plot_data, file.path(concat_dir, "lower-diagonal_mean_sd.csv"))
+
+# Plot the lower off-diagonal characteristics with error bars
+ggplot(plot_data, aes(x = lag, y = mean_value)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = mean_value - lower_sd, ymax = mean_value + upper_sd), width = 0) +
+  scale_x_continuous(breaks = seq(0, max(plot_data$lag), by = 50)) +
+  labs(x = "Lag", y = "Mean Fisher's Z") +
+  ggtitle("Lower Off-diagonal Characteristics")
+
+#For the readability, seperate x axis into four panels
+# Create a new column to assign each data point to a panel
+plot_data$panel <- cut(plot_data$lag, breaks = seq(0, num_timepoints - 1, length.out = num_panels + 1), labels = FALSE)
+
+# Define the panel titles based on the range of x-axis with rounded lag values
+suppressWarnings({
+  panel_starts <- seq(0, (num_timepoints - 1) / num_panels * (num_panels - 1), by = (num_timepoints - 1) / num_panels)
+  panel_ends <- panel_starts + (num_timepoints - 1) / num_panels
+  panel_titles <- paste0("Lag (", round(panel_starts+1), " to ", round(panel_ends), ")")
+  panel_titles[1] <- paste0("Lag (", 0, " to ", round(panel_ends), ")")
+})
+
+# Create the plot with facets and custom panel titles
+p<- ggplot(plot_data, aes(x = lag, y = mean_value)) +
+    geom_point(color = "blue", size = 3) +
+    geom_errorbar(aes(ymin = mean_value - lower_sd, ymax = mean_value + upper_sd), width = 0.2, color = "black") +
+    facet_wrap(~ panel, scales = "free_x", ncol = 1, labeller = labeller(panel = as_labeller(setNames(panel_titles, 1:num_panels)))) +
+    labs(x = "Lag", y = "Mean Fisher's Z") +
+    ggtitle("Lower Off-diagonal Characteristics") +
+    theme_minimal() +
+    theme(plot.title = element_text(size=22),
+          panel.background = element_rect(fill = "white"),  # Set the background color to white
+          axis.title = element_text(size = 20),
+          axis.text = element_text(size = 20),
+          axis.text.x = element_text(angle = 0, hjust = 0.5),
+          panel.spacing = unit(0.5, "lines"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          strip.text = element_text(size = 20, face = "bold"),
+          strip.background = element_rect(fill = "white", color = "black"),
+          axis.ticks.x = element_line(size = 0.5),  # Customize x-axis ticks
+          axis.ticks.length = unit(0.2, "cm"),  # Set the length of x-axis ticks
+          axis.ticks.margin = unit(0.2, "cm"),  # Set the margin of x-axis ticks
+          axis.ticks = element_line(color = "black"),
+          plot.margin = margin(1, 1, 1, 1, "cm")) +
+    scale_x_continuous(breaks = seq(0, num_timepoints - 1, by = 20))  # Customize x-axis tick intervals
+
+png(file.path(fig_dir, "lower_off-diagonal_mean_and_sd_z.png"), width = 2000, height = 2000, units = "px")
+print(p)
+dev.off()
+
+
+```
+
+
+#Max SDs from sd data from MZ_list
+```{r}
+library(ggplot2)
+
+num_timepoints <- dim(MZ_list[[1]])[1]
+#num_timepoints <- 954
+
+upper_diag_sd_max <- vector("numeric", length = num_timepoints - 1) #prep array to save max values for sd-upper diag
+lower_diag_sd_max <- vector("numeric", length = num_timepoints - 1) #prep array to save max values for sd-lower diag
+
+#extract sd and calculate max values
+for (i in 1:(num_timepoints - 1)) {
+  upper_diag_sd <- sd_MZ_all[row(sd_MZ_all) == (col(sd_MZ_all) - i)]
+  upper_diag_sd_max[i] <- max(upper_diag_sd, na.rm = TRUE)
+  
+  lower_diag_sd <- sd_MZ_all[row(sd_MZ_all) == (col(sd_MZ_all) + i)]
+  lower_diag_sd_max[i] <- max(lower_diag_sd, na.rm = TRUE)
+}
+
+# Create a data frame for plotting
+plot_data <- data.frame(lag = 1:(num_timepoints - 1), max_value = upper_diag_sd_max)
+
+# Plot the maximum upper off-diagonal standard deviations
+ggplot(plot_data, aes(x = lag, y = max_value)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Lag", y = "Maximum standard deviations of Fisher's z across subjects") +
+  ggtitle("Upper Off-diagonal Standard Deviations")
+
+# Create a data frame for plotting
+plot_data <- data.frame(lag = 1:(num_timepoints - 1), max_value = lower_diag_sd_max)
+
+# Plot the maximum lower off-diagonal standard deviations
+ggplot(plot_data, aes(x = lag, y = max_value)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Lag", y = "Maximum standard deviations of Fisher's z across subjects") +
+  ggtitle("Lower Off-diagonal Standard Deviations")
+
+
+
+##lag0 to lag6
+num_timepoints <- 6
+upper_diag_sd <- vector("numeric", length = num_timepoints)
+lower_diag_sd <- vector("numeric", length = num_timepoints)
+
+for (i in 0:num_timepoints) {
+  upper_diag <- mean_MZ_all[row(mean_MZ_all) == (col(mean_MZ_all) - i)]
+  upper_diag_sd[i+1] <- sd(upper_diag, na.rm = TRUE)
+  
+  lower_diag <- mean_MZ_all[row(mean_MZ_all) == (col(mean_MZ_all) + i)]
+  lower_diag_sd[i+1] <- sd(lower_diag, na.rm = TRUE)
+}
+
+# Create a data frame for plotting
+plot_data <- data.frame(lag = 0:num_timepoints, sd_value = upper_diag_sd)
+
+# Plot the standard deviations of the upper off-diagonal correlations
+ggplot(plot_data, aes(x = lag, y = sd_value)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Lag", y = "Maximum standard deviations of Fisher's z across subjects") +
+  ggtitle("Upper Off-diagonal Standard Deviations")
+
+# Create a data frame for plotting
+plot_data <- data.frame(lag = 0:num_timepoints, sd_value = lower_diag_sd)
+
+# Plot the standard deviations of the lower off-diagonal correlations
+ggplot(plot_data, aes(x = lag, y = sd_value)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Lag", y = "Maximum standard deviations of Fisher's z across subjects") +
+  ggtitle("Lower Off-diagonal Standard Deviations")
+
+
+
+```
+
+
+
+
