@@ -1,0 +1,149 @@
+---
+title: "hist_cmle_isc"
+output: html_document
+date: "2023-08-08"
+---
+
+```{r}
+dat1 <- read.delim("dataTable_ISC_magictrickwatching.txt", header = TRUE, sep = "\t", dec = ".")
+dat1 <- dat1[, -ncol(dat1)]
+
+dat2 <- read.csv("ISC_ROI_results.csv", header = TRUE, sep = ",", dec = ".")
+
+library(stringr)
+
+# Extract both 'sub-*[0-9]{3}' patterns
+matches <- str_match(dat2$file, "(sub-(control|experimental)[0-9]{3}).*(sub-(control|experimental)[0-9]{3})")
+
+# Assign the matches to new columns
+dat2$Subj1 <- matches[, 2]
+dat2$Subj2 <- matches[, 4]
+
+dat <- merge(dat1, dat2, by = c("Subj1", "Subj2"), all = TRUE)
+
+
+```
+
+# Scatter plot with marginal density
+```{r}
+dat$cmle <- abs(dat$curBetaFull_highConf)
+dat$group <- ifelse(dat$cmle > median(dat$cmle), "high", "low")
+
+library(ggplot2)
+library(ggExtra)
+library(gridExtra)
+library(grid)
+
+# Function to create the combined plot for a specified y-variable
+create_combined_plot <- function(data, y_var, y_lab) {
+  
+  # Compute the range of y values to position labels
+  y_max <- max(data[[y_var]], na.rm = TRUE)
+  y_min <- min(data[[y_var]], na.rm = TRUE)
+
+  # Create the main plot without the legend
+  p <- ggplot(data, aes(x=cmle, y=.data[[y_var]], color=as.factor(group))) +
+    geom_point() +
+    geom_smooth(method="lm", se=FALSE, aes(group=1), color="black", linetype="dashed", size = 0.8) + #regression line
+    #geom_smooth(data=subset(data, group == "high"), method="lm", se=FALSE, color="darkblue", linetype="dashed", size=0.8) + # regression line for "high"
+    #geom_smooth(data=subset(data, group == "low"), method="lm", se=FALSE, color="darkgreen", linetype="dashed", size=0.8) + # regression line for "low"
+    theme_bw() +
+    theme(legend.position="none", axis.title.y=element_text(vjust=-0.2), axis.title.x=element_text(vjust=-0.1)) +
+    scale_color_manual(values=c("high"="#404080", "low"="#69b3a2")) +
+    ylab(y_lab) +  # Set the y-axis label
+    xlab("CMLE") +
+    #ylim(-0.05, 0.07) + 
+    geom_point(aes(x=max(data$cmle)-0.02, y=y_max), color="#404080", size=3) +
+    geom_point(aes(x=max(data$cmle)-0.02, y=y_max - (0.1 * (y_max - y_min))), color="#69b3a2", size=3) +
+    annotate("text", x=max(data$cmle)-0.018, y=y_max, label="High CMLE", hjust=0, color="black", size=3.5) + 
+    annotate("text", x=max(data$cmle)-0.018, y=y_max - (0.1 * (y_max - y_min)), label="Low CMLE", hjust=0, color="black", size=3.5)
+    #geom_hline(yintercept=0, linetype="dashed", color="black") 
+
+  
+  # If y_var is aHPC, add both x and y histograms. Else, just y histogram.
+  if(y_var == "aHPC") {
+    marginal_plot <- ggMarginal(p, type="density", margins="both", groupColour=TRUE, groupFill=TRUE, alpha=0.5)
+  } else {
+    marginal_plot <- ggMarginal(p, type="density", margins="y", groupColour=TRUE, groupFill=TRUE, alpha=0.5)
+  }
+  
+  return(marginal_plot)
+}
+
+# List of y variables
+y_vars <- c("aHPC", "Caudate", "NAcc", "VTASN")
+y_labs <- c("ISC (aHPC)", "ISC (Caudate)", "ISC (NAcc)", "ISC (VTA/SN)")
+
+y_list <- mapply(list, var=y_vars, lab=y_labs, SIMPLIFY=FALSE)
+
+# Apply the function to each y-variable
+plots <- lapply(y_list, function(y_item) create_combined_plot(dat, y_item$var, y_item$lab))
+
+# Combine all the plots into one figure
+grid.arrange(grobs=plots, ncol=1)
+
+# Save the combined figure to a file
+#ggsave("CMLE_ISC_density.png", grid.arrange(grobs=plots, ncol=1), width=6, height=18)
+
+ggsave("CMLE_ISC_density_line.png", grid.arrange(grobs=plots, ncol=1), width=6, height=18)
+#ggsave("CMLE_ISC_density_line_group.png", grid.arrange(grobs=plots, ncol=1), width=6, height=18)
+
+
+
+```
+
+# switch axes
+```{r}
+# Modified function to create the combined plot with switched axes
+create_combined_plot <- function(data, x_var, x_lab) {
+  
+  # Compute the range of y values to position labels
+  x_max <- max(data[[x_var]], na.rm = TRUE)
+  x_min <- min(data[[x_var]], na.rm = TRUE)
+  y_max <- max(dat$cmle)
+  y_min <- min(dat$cmle)
+
+  # Create the main plot without the legend with switched x and y
+  p <- ggplot(data, aes(y=cmle, x=.data[[x_var]], color=as.factor(group))) +
+    geom_point() +
+    theme_bw() +
+    theme(legend.position="none") +
+    scale_color_manual(values=c("high"="#404080", "low"="#69b3a2")) +
+    xlab(x_lab) +  
+    ylab("CMLE") +
+    # Annotations adjusted for the switched axes
+    geom_point(aes(x=x_max-0.02, y=y_max), color="#404080", size=3) +
+    geom_point(aes(x=x_max-0.02, y=y_max - (0.1 * (y_max - y_min))), color="#69b3a2", size=3) +
+    annotate("text", x=x_max-0.018, y=y_max, label="High CMLE", hjust=0, color="black", size=3.5) + 
+    annotate("text", x=x_max-0.018, y=y_max - (0.1 * (y_max - y_min)), label="Low CMLE", hjust=0, color="black", size=3.5) +
+    geom_vline(xintercept=0, linetype="dashed", color="black")  # Add a dashed line at x=0
+  
+  # Marginal plots adjusted for the switched axes
+  if(x_var == "VTASN") {
+    marginal_plot <- ggMarginal(p, type="density", margins="both", groupColour=TRUE, groupFill=TRUE, alpha=0.5)
+  } else {
+    marginal_plot <- ggMarginal(p, type="density", margins="x", groupColour=TRUE, groupFill=TRUE, alpha=0.5)
+  }
+  
+  return(marginal_plot)
+}
+
+# List of y variables
+x_vars <- c("aHPC", "Caudate", "NAcc", "VTASN")
+x_labs <- c("ISC (aHPC)", "ISC (Caudate)", "ISC (NAcc)", "ISC (VTA/SN)")
+
+x_list <- mapply(list, var=x_vars, lab=x_labs, SIMPLIFY=FALSE)
+
+# Apply the function to each y-variable
+plots <- lapply(x_list, function(y_item) create_combined_plot(dat, y_item$var, y_item$lab))
+
+# Combine all the plots into one row
+grid.arrange(grobs=plots, nrow=1)
+
+# Save the combined figure to a file in one row
+#ggsave("CMLE_ISC_density_row.png", grid.arrange(grobs=plots, nrow=1), width=20, height=6)
+
+```
+
+
+
